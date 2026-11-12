@@ -1,0 +1,52 @@
+TB Type A 360 - CLAP, VST3 and AU for macOS 11 or later
+(Apple Silicon and Intel)
+
+1. Copy each plugin into ONE of the two Library plug-in folders on your Mac
+   (in Finder: Go menu > Go to Folder..., then paste the path):
+
+   Main Library (for every user on the Mac; Finder asks for your password):
+     TB Type A 360.vst3       ->  /Library/Audio/Plug-Ins/VST3/
+     TB Type A 360.component  ->  /Library/Audio/Plug-Ins/Components/
+     TB Type A 360.clap       ->  /Library/Audio/Plug-Ins/CLAP/
+
+   or your own user Library (the path starts with ~):
+     TB Type A 360.vst3       ->  ~/Library/Audio/Plug-Ins/VST3/
+     TB Type A 360.component  ->  ~/Library/Audio/Plug-Ins/Components/
+     TB Type A 360.clap       ->  ~/Library/Audio/Plug-Ins/CLAP/
+
+   Put them wherever your other plugins already are. Create a folder if it
+   does not exist. You only need the formats your DAW uses: Reaper and
+   FL Studio load VST3 (Reaper also loads CLAP and AU), Logic and GarageBand
+   load AU.
+
+2. These plugins are not notarised by Apple, so macOS quarantines them after
+   download and will not let a DAW load them. Quit your DAW, open Terminal,
+   and paste these lines one at a time, pressing Return after each.
+
+   If you used the main Library (/Library):
+
+     cd /Library/Audio/Plug-Ins
+     ls */ | grep -i "type a"
+     sudo xattr -cr */"TB Type A 360".*
+     sudo codesign --force --deep --sign - */"TB Type A 360".*
+     killall -9 AudioComponentRegistrar
+
+   If you used your user Library (~/Library), the same without sudo:
+
+     cd ~/Library/Audio/Plug-Ins
+     ls */ | grep -i "type a"
+     xattr -cr */"TB Type A 360".*
+     codesign --force --deep --sign - */"TB Type A 360".*
+     killall -9 AudioComponentRegistrar
+
+   The "ls" line should list the plugin files; if it lists nothing, they are
+   in the other folder. "sudo" asks for your Mac login password (nothing
+   shows as you type). The lines remove macOS's download tags, re-sign the
+   plugins on your Mac, and make macOS look at the AU again.
+
+3. Open your DAW and rescan. In Reaper: Settings > Plug-ins > VST and CLAP,
+   "Clear cache/re-scan". The plugin appears as "TB Type A 360" by TB.
+
+Presets are kept in
+  ~/Library/Application Support/TB/TB Type A 360/Presets.txt
+and are shared by all three formats.

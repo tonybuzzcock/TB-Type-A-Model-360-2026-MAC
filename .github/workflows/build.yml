@@ -1,0 +1,190 @@
+name: Build and test
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Mac runner (macos-15-intel, or macos-15 for Apple Silicon)'
+        default: 'macos-15-intel'
+
+permissions:
+  contents: write   # tagged builds attach the plugins to a Release; main publishes panel screenshots
+
+env:
+  NAME: TB Type A 360
+  ZIP: TB-Type-A-Model-360-mac.zip
+
+jobs:
+  linux:
+    name: CLAP and tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j4
+
+      - name: Preset store
+        run: build/preset_test
+
+      - name: CLAP in a test host
+        run: build/clap_host_test "build/plugins/$NAME.clap"
+
+      - name: DSP test suite (A-type model)
+        run: |
+          mkdir -p renders
+          build/typea_test renders
+
+      - name: Upload demo renders
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-renders
+          path: renders/*.wav
+
+  mac:
+    name: CLAP, VST3, AU for macOS 11+ (Apple Silicon + Intel)
+    # Intel runner by default: GitHub's Apple Silicon runners were too busy to
+    # pick up jobs. Either runner builds the same universal plugins.
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build (universal)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j4
+          ls -la build/plugins
+
+      - name: Verify architectures and minimum macOS
+        run: |
+          set -e
+          for b in "build/plugins/$NAME.clap/Contents/MacOS/$NAME" \
+                   "build/plugins/$NAME.vst3/Contents/MacOS/$NAME" \
+                   "build/plugins/$NAME.component/Contents/MacOS/$NAME"; do
+            echo "== $b"
+            archs=$(lipo -archs "$b"); echo "archs: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::$b is not universal"; exit 1; }
+            minos=$(vtool -show-build "$b" | awk '/minos/{print $2}' | sort -u | tr '\n' ' '); echo "minos: $minos"
+            [ "$(echo $minos)" = "11.0" ] || { echo "::error::$b minimum macOS is '$minos', expected 11.0"; exit 1; }
+            otool -L "$b" | tail -n +2
+          done
+          echo "::notice::All three plugins are universal (Apple Silicon + Intel), minimum macOS 11.0"
+
+      - name: Ad-hoc sign the bundles
+        run: |
+          for ext in clap vst3 component; do
+            codesign --force --deep --sign - "build/plugins/$NAME.$ext"
+            codesign --verify --deep --strict "build/plugins/$NAME.$ext"
+          done
+
+      - name: Preset store
+        run: build/preset_test
+
+      - name: CLAP in a test host (runner's own architecture)
+        run: |
+          echo "runner: $(uname -m)"
+          build/clap_host_test "build/plugins/$NAME.clap/Contents/MacOS/$NAME"
+
+      - name: CLAP in a test host (other architecture)
+        run: |
+          if [ "$(uname -m)" = "arm64" ] && arch -x86_64 /usr/bin/true 2>/dev/null; then
+            arch -x86_64 build/clap_host_test "build/plugins/$NAME.clap/Contents/MacOS/$NAME"
+          else
+            echo "::notice::Intel runner: the Apple Silicon slice was built and checked with lipo/vtool but cannot run here"
+          fi
+
+      - name: DSP test suite (A-type model)
+        run: |
+          mkdir -p build/renders
+          build/typea_test build/renders
+
+      - name: Panel offscreen, controls, presets, screenshots
+        run: |
+          mkdir -p build/gui
+          build/panel_test "build/plugins/$NAME.clap/Contents/MacOS/$NAME" build/gui
+
+      - name: Upload panel screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-screenshots
+          path: build/gui/*.png
+
+      - name: Publish panel screenshots to the gui-preview branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/preview && mkdir /tmp/preview && cp build/gui/*.png /tmp/preview/
+          cd /tmp/preview
+          git init -q && git checkout -q -b gui-preview
+          git -c user.name="github-actions" -c user.email="actions@github.com" add .
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -q -m "Panel screenshots for $GITHUB_SHA"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gui-preview
+
+      - name: Apple AU validation (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/plugins/$NAME.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -a | grep -i "TBel" || true
+          auval -v aufx TBta TBel | tee auval.log
+          grep -q "AU VALIDATION SUCCEEDED" auval.log
+
+      - name: clap-validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tools && cd tools
+          gh release download --repo free-audio/clap-validator --pattern '*macos-universal*' --clobber
+          for a in *.zip; do [ -f "$a" ] && unzip -oq "$a"; done
+          # The archive may hold a tarball, and zip does not keep the executable bit
+          for t in $(find . -name '*.tar*' -type f); do tar xf "$t"; done
+          find . -type f \( -name 'clap-validator' -o -name 'clap-validator-*' \) ! -name '*.zip' ! -name '*.tar*' -print
+          CV=$(find . -type f \( -name 'clap-validator' -o -name 'clap-validator-*' \) ! -name '*.zip' ! -name '*.tar*' | head -1)
+          [ -n "$CV" ] || { echo "::error::clap-validator not found in the release"; ls -R; exit 1; }
+          chmod +x "$CV"
+          echo "using $CV"
+          "$CV" validate --only-failed "../build/plugins/$NAME.clap"
+
+      - name: pluginval (VST3 and AU)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tools && cd tools
+          gh release download --repo Tracktion/pluginval --pattern 'pluginval_macOS.zip' --clobber
+          unzip -oq pluginval_macOS.zip
+          PV=pluginval.app/Contents/MacOS/pluginval
+          $PV --strictness-level 5 --skip-gui-tests --validate-in-process --validate "../build/plugins/$NAME.vst3"
+          $PV --strictness-level 5 --skip-gui-tests --validate-in-process --validate ~/Library/Audio/Plug-Ins/Components/"$NAME.component"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp -R "build/plugins/$NAME.clap" "build/plugins/$NAME.vst3" "build/plugins/$NAME.component" dist/
+          cp INSTALL.txt dist/
+          (cd dist && ditto -c -k --sequesterRsrc . "../$ZIP")
+          ls -la "$ZIP"
+
+      - name: Upload the plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: TB-Type-A-Model-360-mac
+          path: ${{ env.ZIP }}
+
+      - name: Attach to GitHub Release (tagged builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" \
+            --title "TB Type A 360 $GITHUB_REF_NAME" \
+            --notes "CLAP, VST3 and AU for macOS 11 and later, Apple Silicon and Intel. See INSTALL.txt inside the zip." \
+          || gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber
