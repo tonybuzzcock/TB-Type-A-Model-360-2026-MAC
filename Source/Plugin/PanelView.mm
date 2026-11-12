@@ -175,6 +175,8 @@ void lampColours (int lamp, NSColor** top, NSColor** bottom, NSColor** glow, NSC
     self = [super initWithFrame: frame];
     if (self)
     {
+        // Draw on the full-size canvas, shown at the window's size (20% smaller)
+        [self setBoundsSize: NSMakeSize (kPanelWidth, kPanelHeight)];
         host = h;
         for (int i = 0; i < kNumParams; ++i) shown[i] = host->getParam (i);
         for (int i = 0; i < kNumMeters; ++i) meter[i] = host->getMeter (i);

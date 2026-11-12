@@ -164,7 +164,7 @@ int main (int argc, char** argv)
     const clap_plugin_gui_t* gui = (const clap_plugin_gui_t*) p->get_extension (p, CLAP_EXT_GUI);
     check (gui && gui->is_api_supported (p, CLAP_WINDOW_API_COCOA, false), "supports an embedded Cocoa panel");
     uint32_t w = 0, h = 0;
-    check (gui->create (p, CLAP_WINDOW_API_COCOA, false) && gui->get_size (p, &w, &h) && w == (uint32_t) tbtypea::kEditorWidth && h == (uint32_t) tbtypea::kEditorHeight, "panel size as declared (1800 x 270)");
+    check (gui->create (p, CLAP_WINDOW_API_COCOA, false) && gui->get_size (p, &w, &h) && w == (uint32_t) tbtypea::kEditorWidth && h == (uint32_t) tbtypea::kEditorHeight, "panel size as declared (1440 x 216, 20% smaller than the drawing)");
 
     NSWindow* win = [[NSWindow alloc] initWithContentRect: NSMakeRect (0, 0, w, h) styleMask: NSWindowStyleMaskBorderless
                                                   backing: NSBackingStoreBuffered defer: NO];

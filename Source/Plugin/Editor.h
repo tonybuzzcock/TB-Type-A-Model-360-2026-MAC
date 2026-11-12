@@ -9,7 +9,10 @@
 namespace tbtypea
 {
 
-enum { kEditorWidth = 1800, kEditorHeight = 270 };   // the 1U rack face (19" proportions), then the plugin strip
+// The panel is drawn on a 1800 x 270 canvas (the 1U rack face in 19" proportions,
+// then the strip) and shown 20% smaller, 1440 x 216, so it fits a laptop screen.
+enum { kPanelWidth = 1800, kPanelHeight = 270 };      // drawing coordinates
+enum { kEditorWidth = 1440, kEditorHeight = 216 };    // window size the host sees
 
 // What the panel shows from the running circuit
 enum Meter { kMeterLevel = 0, kNumMeters };
