@@ -137,6 +137,20 @@ static void setParam (const clap_plugin_t* p, const clap_plugin_params_t* pp, in
     OutEvents o; pp->flush (p, &in, &o.list);
 }
 
+// Does the preset file hold this name line?
+static bool fileHasLine (const std::string& path, const char* needle)
+{
+    bool found = false;
+    FILE* nf = std::fopen (path.c_str(), "r");
+    if (nf)
+    {
+        char ln[256];
+        while (std::fgets (ln, sizeof (ln), nf)) if (std::strstr (ln, needle)) found = true;
+        std::fclose (nf);
+    }
+    return found;
+}
+
 int main (int argc, char** argv)
 {
     if (argc < 3) { std::printf ("usage: %s <clap binary> <png dir>\n", argv[0]); return 2; }
@@ -261,6 +275,25 @@ int main (int argc, char** argv)
     FILE* pf = std::fopen (presetFile.c_str(), "r");
     check (pf != nullptr, "SAVE then a slot writes the preset file");
     if (pf) std::fclose (pf);
+
+    // Saving opens a name box over the readout
+    NSTextField* field = nil;
+    for (NSView* sv in [panel subviews]) if ([sv isKindOfClass: [NSTextField class]]) field = (NSTextField*) sv;
+    check (field != nil, "saving opens a box to name the preset");
+    renderPNG (panel, dir + "/panel_naming.png");
+    if (field)
+    {
+        [field setStringValue: @"A forty character preset name for tests"];   // 40 characters
+        [(id) panel controlTextDidChange: nil];
+        renderPNG (panel, dir + "/panel_naming_long.png");
+        [field setStringValue: @"Big slow flange"];
+        [field sendAction: [field action] to: [field target]];       // Return
+        pump (0.2);
+    }
+    check (fileHasLine (presetFile, "name 3: Big slow flange"), "Return saves the name with the preset");
+    bool gone = true;
+    for (NSView* sv in [panel subviews]) if ([sv isKindOfClass: [NSTextField class]]) gone = false;
+    check (gone, "and the name box goes away");
     renderPNG (panel, dir + "/panel_preset_saved.png");
 
     setParam (p, pp, kB4Level, 0.9);
@@ -271,6 +304,20 @@ int main (int argc, char** argv)
     check (std::fabs (val (p, pp, kB4Level) - 0.3) < 1e-5 && val (p, pp, kB1On) == 0.0,
            "clicking the slot recalls the saved settings");
     check (rec.values >= kNumParams, "recall tells the host about every parameter");
+    renderPNG (panel, dir + "/panel_preset_loaded.png");
+
+    // Clicking the readout while the preset is in use renames it; Esc keeps the old name
+    click (win, panel, NSMakePoint (700, 215));
+    field = nil;
+    for (NSView* sv in [panel subviews]) if ([sv isKindOfClass: [NSTextField class]]) field = (NSTextField*) sv;
+    check (field != nil && [[field stringValue] isEqualToString: @"Big slow flange"], "clicking the readout opens the name to edit");
+    if (field)
+    {
+        [field setStringValue: @"Something else"];
+        [(id) panel control: field textView: nil doCommandBySelector: @selector (cancelOperation:)];   // Esc
+        pump (0.2);
+    }
+    check (fileHasLine (presetFile, "name 3: Big slow flange"), "Esc keeps the old name");
     const double before = val (p, pp, kB4Level);
     click (win, panel, SLOT (5));
     check (val (p, pp, kB4Level) == before, "an empty slot changes nothing");
